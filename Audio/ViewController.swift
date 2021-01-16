@@ -9,7 +9,7 @@
 import UIKit
 import AVFoundation
 
-class ViewController: UIViewController, AVAudioPlayerDelegate {
+class ViewController: UIViewController, AVAudioPlayerDelegate, AVAudioRecorderDelegate{
     
     var audioPlayer : AVAudioPlayer!
     var audioFile : URL!
@@ -17,22 +17,85 @@ class ViewController: UIViewController, AVAudioPlayerDelegate {
     var progressTimer : Timer!
     
     let timePlayerSelector:Selector = #selector(ViewController.updatePlayTime)
+    let timeRecordSelector:Selector = #selector(ViewController.updateRecordTime)
 
     @IBOutlet var pvProgressPlay: UIProgressView!
-    
     @IBOutlet var lblCurrentTime: UILabel!
     @IBOutlet var lblEndTime: UILabel!
-    
     @IBOutlet var btnPlay: UIButton!
     @IBOutlet var btnPause: UIButton!
     @IBOutlet var btnStop: UIButton!
-    
     @IBOutlet var slVolume: UISlider!
+    
+    @IBOutlet var btnRecord: UIButton!
+    @IBOutlet var lblRecordTime: UILabel!
+    
+    var audioRecorder : AVAudioRecorder!
+    var isRecordMode = false
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         // Do any additional setup after loading the view.
+        selectAudioFile()
+        if !isRecordMode {
+            initPlay()
+            btnRecord.isEnabled = false
+            lblRecordTime.isEnabled = false
+        } else {
+            initRecord()
+        }
+    }
+    
+    //재생 or 녹음 파일 모드 선택
+    func selectAudioFile(){
+        if !isRecordMode {
         audioFile = Bundle.main.url(forResource: "Sicilian_Breeze", withExtension: "mp3")
-        initPlay()
+        } else {
+            let documentDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            audioFile = documentDirectory.appendingPathComponent("recordFile.m4a")
+        }
+    }
+    
+    //녹음 초기화
+    func initRecord(){
+        let recordSettings = [
+            //포맷
+            AVFormatIDKey : NSNumber(value:kAudioFormatAppleLossless as UInt32),
+            //음질
+            AVEncoderAudioQualityKey : AVAudioQuality.max.rawValue,
+            //비트율
+            AVEncoderBitRateKey : 320000,
+            //오디오 채널
+            AVNumberOfChannelsKey : 2,
+            //샘플률
+            AVSampleRateKey : 44100.0] as [String:Any]
+        
+        do {
+            audioRecorder = try AVAudioRecorder(url:audioFile, settings: recordSettings)
+        } catch let error as NSError {
+            print("Error-initRecord : \(error)")
+        }
+        
+        audioRecorder.delegate = self
+        
+        slVolume.value = 1.0
+        audioPlayer.volume = slVolume.value
+        lblEndTime.text = convertNSTimeInterval2String(0)
+        lblCurrentTime.text = convertNSTimeInterval2String(0)
+        setPlayButtons(false, pause: false, stop: false)
+        
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch let error as NSError {
+            print("Error-setCategory : \(error)")
+        }
+        do {
+            try session.setActive(true)
+        } catch let error as NSError {
+            print("Error-setActive: \(error)")
+        }
     }
     
     //오디오 재생 초기화
@@ -52,6 +115,7 @@ class ViewController: UIViewController, AVAudioPlayerDelegate {
         lblEndTime.text = convertNSTimeInterval2String(audioPlayer.duration)
         lblCurrentTime.text = convertNSTimeInterval2String(0)
         setPlayButtons(true, pause: false, stop: false)
+        
     }
     
     func setPlayButtons(_ play:Bool, pause:Bool, stop:Bool){
@@ -99,5 +163,48 @@ class ViewController: UIViewController, AVAudioPlayerDelegate {
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         setPlayButtons(true, pause: false, stop: false)
     }
+    
+    //Record switch on/off 현상
+    @IBAction func swRecordMode(_ sender: UISwitch) {
+        if sender.isOn {
+            audioPlayer.stop()
+            audioPlayer.currentTime = 0
+            lblRecordTime!.text = convertNSTimeInterval2String(0)
+            isRecordMode = true
+            btnRecord.isEnabled = true
+            lblRecordTime.isEnabled = true
+        } else {
+            isRecordMode = false
+            btnRecord.isEnabled = false
+            lblRecordTime.isEnabled = false
+            lblRecordTime.text = convertNSTimeInterval2String(0)
+        }
+        selectAudioFile()
+        if !isRecordMode{
+            initPlay()
+        } else {
+            initRecord()
+        }
+    }
+    
+    //Record 버튼 누르면 바뀌는 현상 , progressTimer -> 녹음시간 표시하기 위한 타이머
+    @IBAction func btnRecord(_ sender: UIButton) {
+        if (sender as AnyObject).titleLabel??.text == "Record" {
+            audioRecorder.record()
+            (sender as AnyObject).setTitle("Stop", for: UIControl.State())
+            progressTimer = Timer.scheduledTimer(timeInterval: 0.1, target: self, selector: timeRecordSelector, userInfo: nil, repeats: true)
+        } else {
+            audioRecorder.stop()
+            progressTimer.invalidate()
+            (sender as AnyObject).setTitle("Record", for: UIControl.State())
+            btnPlay.isEnabled = true
+            initPlay()
+        }
+    }
+    
+    @objc func updateRecordTime(){
+        lblRecordTime.text = convertNSTimeInterval2String(audioRecorder.currentTime)
+    }
+    
 }
 
